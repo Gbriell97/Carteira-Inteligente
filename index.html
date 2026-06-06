@@ -700,7 +700,25 @@ let viewMonth = new Date().getMonth(); // 0-indexed
 let cardViewYear = new Date().getFullYear();
 let cardViewMonth = new Date().getMonth();
 
-// ══ PERSIST ══
+// ══ API CONFIG ══
+const API_URL = 'https://carteira-backend-gtnn.onrender.com';
+let authToken = localStorage.getItem('ci_token') || null;
+
+function apiHeaders(){
+  const h = {'Content-Type':'application/json'};
+  if(authToken) h['Authorization'] = 'Bearer '+authToken;
+  return h;
+}
+async function api(method, path, body){
+  const opts = { method, headers: apiHeaders() };
+  if(body) opts.body = JSON.stringify(body);
+  const res = await fetch(API_URL+path, opts);
+  const data = await res.json();
+  if(!res.ok) throw new Error(data.error || 'Erro na API');
+  return data;
+}
+
+// ══ PERSIST (mantém localStorage como cache local) ══
 function save(){ try{ localStorage.setItem('ci4_state',JSON.stringify(state)); }catch(e){} }
 function load(){ try{ const s=localStorage.getItem('ci4_state')||localStorage.getItem('ci3_state'); if(s) state=Object.assign(state,JSON.parse(s)); }catch(e){} }
 
@@ -746,23 +764,102 @@ function toggleTheme(){
 }
 
 // ══ AUTH ══
-function doLogin(){
-  const email=document.getElementById('loginEmail').value;
-  if(!email){alert('Preencha o e-mail');return;}
-  if(!state.user){ const n=email.split('@')[0]; state.user={name:n.charAt(0).toUpperCase()+n.slice(1),email}; save(); }
-  showApp();
+function setLoading(btn, loading, text){
+  if(loading){ btn.disabled=true; btn.textContent='Aguarde...'; }
+  else{ btn.disabled=false; btn.textContent=text; }
 }
-function doRegister(){
+async function doLogin(){
+  const email=document.getElementById('loginEmail').value;
+  const password=document.getElementById('loginPassword').value;
+  if(!email||!password){alert('Preencha e-mail e senha');return;}
+  const btn=document.querySelector('#loginForm button');
+  setLoading(btn,true,'Entrar');
+  try{
+    const data = await api('POST','/api/auth/login',{email,password});
+    authToken = data.token;
+    localStorage.setItem('ci_token', authToken);
+    state.user = {id:data.user.id, name:data.user.name, email:data.user.email};
+    state.initialBalance = parseFloat(data.user.initialBalance||0);
+    save();
+    await loadAllData();
+    showApp();
+  } catch(err){
+    alert('Erro: '+err.message);
+  } finally { setLoading(btn,false,'Entrar'); }
+}
+async function doRegister(){
   const name=document.getElementById('regName').value,email=document.getElementById('regEmail').value;
   const p1=document.getElementById('regPassword').value,p2=document.getElementById('regPassword2').value;
   if(!name||!email||!p1){alert('Preencha todos os campos');return;}
   if(p1!==p2){alert('As senhas não coincidem');return;}
-  state.user={name,email}; save(); showApp();
+  const btn=document.querySelector('#registerForm button');
+  setLoading(btn,true,'Criar conta');
+  try{
+    const data = await api('POST','/api/auth/register',{name,email,password:p1});
+    authToken = data.token;
+    localStorage.setItem('ci_token', authToken);
+    state.user = {id:data.user.id, name:data.user.name, email:data.user.email};
+    state.initialBalance = 0;
+    save();
+    await loadAllData();
+    showApp();
+  } catch(err){
+    alert('Erro: '+err.message);
+  } finally { setLoading(btn,false,'Criar conta'); }
+}
+async function loadAllData(){
+  try{
+    const [txs, cards, purchases, investments, friends, debts, cats] = await Promise.all([
+      api('GET','/api/transactions'),
+      api('GET','/api/cards'),
+      api('GET','/api/cards/purchases'),
+      api('GET','/api/investments'),
+      api('GET','/api/friends'),
+      api('GET','/api/friends/debts'),
+      api('GET','/api/categories'),
+    ]);
+    // Map API format to local state format
+    state.transactions = txs.map(t=>({
+      id:String(t.id), type:t.type, desc:t.description, valor:parseFloat(t.amount),
+      data:t.date?t.date.slice(0,10):null, catId:String(t.category_id||'cat12'),
+      obs:t.notes||'', forma:t.payment_method||'', cardId:t.card_id?String(t.card_id):null
+    }));
+    state.cards = cards.map(c=>({
+      id:String(c.id), nome:c.name, banco:c.bank||'', bandeira:c.brand||'Visa',
+      limite:parseFloat(c.total_limit||0), fecha:c.closing_day||10, vence:c.due_day||17, cor:c.color||'linear-gradient(135deg,#1a6ef5,#7c3aed)'
+    }));
+    state.cardPurchases = purchases.map(p=>({
+      id:String(p.id), desc:p.description, valor:parseFloat(p.total_amount),
+      valorParcela:parseFloat(p.installment_amount), parcelas:p.installments||1,
+      data:p.date?p.date.slice(0,10):null, cardId:String(p.card_id), catId:String(p.category_id||'cat12')
+    }));
+    state.investments = investments.map(i=>({
+      id:String(i.id), nome:i.name, tipo:i.type||'Reserva',
+      atual:parseFloat(i.current_amount||0), meta:parseFloat(i.goal_amount||0),
+      data:i.target_date?i.target_date.slice(0,10):null
+    }));
+    state.friends = friends.map(f=>({
+      id:String(f.id), nome:f.name, tel:f.phone||'', email:f.email||''
+    }));
+    state.debts = debts.map(d=>({
+      id:String(d.id), amigoId:String(d.friend_id), valor:parseFloat(d.original_amount),
+      pago:parseFloat(d.paid_amount||0), motivo:d.description,
+      data:d.loan_date?d.loan_date.slice(0,10):null,
+      prazo:d.expected_payment_date?d.expected_payment_date.slice(0,10):null,
+      status:d.status||'pending'
+    }));
+    if(cats && cats.length){
+      state.categories = cats.map(c=>({
+        id:String(c.id), name:c.name, type:c.type, icon:c.icon||'📦', color:c.color||'#6b7280'
+      }));
+    }
+    save();
+  } catch(err){ console.error('Erro ao carregar dados:', err); }
 }
 function showRegister(){ document.getElementById('loginForm').style.display='none'; document.getElementById('registerForm').style.display='block'; }
 function showLogin(){ document.getElementById('loginForm').style.display='block'; document.getElementById('registerForm').style.display='none'; }
 function showApp(){ document.getElementById('loginScreen').style.display='none'; document.getElementById('appScreen').style.display='block'; updateUserUI(); renderAll(); }
-function logout(){ document.getElementById('appScreen').style.display='none'; document.getElementById('loginScreen').style.display='flex'; }
+function logout(){ authToken=null; localStorage.removeItem('ci_token'); document.getElementById('appScreen').style.display='none'; document.getElementById('loginScreen').style.display='flex'; }
 function updateUserUI(){
   if(!state.user) return;
   const init=state.user.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
@@ -980,56 +1077,95 @@ function closeModal(name){ document.getElementById('modal-'+name).classList.remo
 document.querySelectorAll('.overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
 
 // ══ SAVE ══
-function saveEntrada(){
+async function saveEntrada(){
   const desc=document.getElementById('ent-desc').value, valor=parseFloat(document.getElementById('ent-valor').value)||0;
   if(!desc||!valor){alert('Preencha descrição e valor');return;}
   const cardId=document.getElementById('ent-cartao').value||null;
-  state.transactions.push({id:uid(),type:'income',desc,valor,data:document.getElementById('ent-data').value,catId:document.getElementById('ent-cat').value,obs:document.getElementById('ent-obs').value,cardId});
-  save(); closeModal('entrada'); renderAll(); resetFields(['ent-desc','ent-valor','ent-obs']);
+  const catId=document.getElementById('ent-cat').value;
+  const date=document.getElementById('ent-data').value;
+  const obs=document.getElementById('ent-obs').value;
+  try{
+    const t = await api('POST','/api/transactions',{type:'income',description:desc,amount:valor,date,categoryId:catId,cardId:cardId||null,notes:obs});
+    state.transactions.push({id:String(t.id),type:'income',desc,valor,data:date,catId,obs,cardId});
+    save(); closeModal('entrada'); renderAll(); resetFields(['ent-desc','ent-valor','ent-obs']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveSaida(){
+async function saveSaida(){
   const desc=document.getElementById('sai-desc').value, valor=parseFloat(document.getElementById('sai-valor').value)||0;
   if(!desc||!valor){alert('Preencha descrição e valor');return;}
-  state.transactions.push({id:uid(),type:'expense',desc,valor,data:document.getElementById('sai-data').value,catId:document.getElementById('sai-cat').value,obs:document.getElementById('sai-obs').value});
-  save(); closeModal('saida'); renderAll(); resetFields(['sai-desc','sai-valor','sai-obs']);
+  const catId=document.getElementById('sai-cat').value, date=document.getElementById('sai-data').value, obs=document.getElementById('sai-obs').value;
+  try{
+    const t = await api('POST','/api/transactions',{type:'expense',description:desc,amount:valor,date,categoryId:catId,notes:obs});
+    state.transactions.push({id:String(t.id),type:'expense',desc,valor,data:date,catId,obs});
+    save(); closeModal('saida'); renderAll(); resetFields(['sai-desc','sai-valor','sai-obs']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveDebito(){
+async function saveDebito(){
   const desc=document.getElementById('deb-desc').value, valor=parseFloat(document.getElementById('deb-valor').value)||0;
   if(!desc||!valor){alert('Preencha descrição e valor');return;}
   const cardId=document.getElementById('deb-cartao').value||null;
-  state.transactions.push({id:uid(),type:'debit',desc,valor,data:document.getElementById('deb-data').value,catId:document.getElementById('deb-cat').value,forma:document.getElementById('deb-forma').value,obs:document.getElementById('deb-obs').value,cardId});
-  save(); closeModal('debito'); renderAll(); resetFields(['deb-desc','deb-valor']);
+  const catId=document.getElementById('deb-cat').value, date=document.getElementById('deb-data').value;
+  const forma=document.getElementById('deb-forma').value, obs=document.getElementById('deb-obs').value;
+  try{
+    const t = await api('POST','/api/transactions',{type:'debit',description:desc,amount:valor,date,categoryId:catId,paymentMethod:forma,cardId:cardId||null,notes:obs});
+    state.transactions.push({id:String(t.id),type:'debit',desc,valor,data:date,catId,forma,obs,cardId});
+    save(); closeModal('debito'); renderAll(); resetFields(['deb-desc','deb-valor']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveCartao(){
+async function saveCartao(){
   const nome=document.getElementById('cc-nome').value;
   if(!nome){alert('Informe o nome do cartão');return;}
-  state.cards.push({id:uid(),nome,banco:document.getElementById('cc-banco').value,bandeira:document.getElementById('cc-bandeira').value,limite:parseFloat(document.getElementById('cc-limite').value)||0,fecha:parseInt(document.getElementById('cc-fecha').value)||10,vence:parseInt(document.getElementById('cc-vence').value)||17,cor:document.getElementById('cc-cor').value});
-  save(); closeModal('novoCartao'); renderAll(); resetFields(['cc-nome','cc-banco','cc-limite','cc-fecha','cc-vence']);
+  const banco=document.getElementById('cc-banco').value, bandeira=document.getElementById('cc-bandeira').value;
+  const limite=parseFloat(document.getElementById('cc-limite').value)||0;
+  const fecha=parseInt(document.getElementById('cc-fecha').value)||10, vence=parseInt(document.getElementById('cc-vence').value)||17;
+  const cor=document.getElementById('cc-cor').value;
+  try{
+    const c = await api('POST','/api/cards',{name:nome,bank:banco,brand:bandeira,totalLimit:limite,closingDay:fecha,dueDay:vence,color:cor});
+    state.cards.push({id:String(c.id),nome,banco,bandeira,limite,fecha,vence,cor});
+    save(); closeModal('novoCartao'); renderAll(); resetFields(['cc-nome','cc-banco','cc-limite','cc-fecha','cc-vence']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveCompraCartao(){
+async function saveCompraCartao(){
   const desc=document.getElementById('ccp-desc').value, valor=parseFloat(document.getElementById('ccp-valor').value)||0;
   const parcelas=parseInt(document.getElementById('ccp-parcelas').value)||1;
   if(!desc||!valor){alert('Preencha descrição e valor');return;}
-  state.cardPurchases.push({id:uid(),desc,valor,valorParcela:valor/parcelas,parcelas,data:document.getElementById('ccp-data').value,cardId:document.getElementById('ccp-cartao').value,catId:document.getElementById('ccp-cat').value});
-  save(); closeModal('compraCartao'); renderAll(); resetFields(['ccp-desc','ccp-valor']);
+  const date=document.getElementById('ccp-data').value, cardId=document.getElementById('ccp-cartao').value, catId=document.getElementById('ccp-cat').value;
+  try{
+    const p = await api('POST','/api/cards/purchases',{description:desc,totalAmount:valor,installments:parcelas,date,cardId,categoryId:catId});
+    state.cardPurchases.push({id:String(p.id),desc,valor,valorParcela:valor/parcelas,parcelas,data:date,cardId,catId});
+    save(); closeModal('compraCartao'); renderAll(); resetFields(['ccp-desc','ccp-valor']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveInvestimento(){
+async function saveInvestimento(){
   const nome=document.getElementById('inv-nome').value;
   if(!nome){alert('Informe o nome do objetivo');return;}
-  state.investments.push({id:uid(),nome,tipo:document.getElementById('inv-tipo').value,atual:parseFloat(document.getElementById('inv-atual').value)||0,meta:parseFloat(document.getElementById('inv-meta').value)||0,data:document.getElementById('inv-data').value});
-  save(); closeModal('novoInv'); renderAll(); resetFields(['inv-nome','inv-atual','inv-meta']);
+  const tipo=document.getElementById('inv-tipo').value, atual=parseFloat(document.getElementById('inv-atual').value)||0;
+  const meta=parseFloat(document.getElementById('inv-meta').value)||0, data=document.getElementById('inv-data').value;
+  try{
+    const i = await api('POST','/api/investments',{name:nome,type:tipo,currentAmount:atual,goalAmount:meta,targetDate:data||null});
+    state.investments.push({id:String(i.id),nome,tipo,atual,meta,data});
+    save(); closeModal('novoInv'); renderAll(); resetFields(['inv-nome','inv-atual','inv-meta']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveAmigo(){
+async function saveAmigo(){
   const nome=document.getElementById('ami-nome').value;
   if(!nome){alert('Informe o nome');return;}
-  state.friends.push({id:uid(),nome,tel:document.getElementById('ami-tel').value,email:document.getElementById('ami-email').value});
-  save(); closeModal('novoAmigo'); renderAll(); resetFields(['ami-nome','ami-tel','ami-email']);
+  const tel=document.getElementById('ami-tel').value, email=document.getElementById('ami-email').value;
+  try{
+    const f = await api('POST','/api/friends',{name:nome,phone:tel,email});
+    state.friends.push({id:String(f.id),nome,tel,email});
+    save(); closeModal('novoAmigo'); renderAll(); resetFields(['ami-nome','ami-tel','ami-email']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
-function saveDivida(){
-  const amigoId=document.getElementById('div-amigo').value,valor=parseFloat(document.getElementById('div-valor').value)||0,motivo=document.getElementById('div-motivo').value;
+async function saveDivida(){
+  const amigoId=document.getElementById('div-amigo').value, valor=parseFloat(document.getElementById('div-valor').value)||0, motivo=document.getElementById('div-motivo').value;
   if(!amigoId||!valor||!motivo){alert('Preencha todos os campos');return;}
-  state.debts.push({id:uid(),amigoId,valor,pago:0,motivo,data:document.getElementById('div-data').value,prazo:document.getElementById('div-prazo').value,status:'pending'});
-  save(); closeModal('novaDivida'); renderAll(); resetFields(['div-valor','div-motivo']);
+  const data=document.getElementById('div-data').value, prazo=document.getElementById('div-prazo').value;
+  try{
+    const d = await api('POST','/api/friends/debts',{friendId:amigoId,originalAmount:valor,description:motivo,loanDate:data,expectedPaymentDate:prazo||null});
+    state.debts.push({id:String(d.id),amigoId,valor,pago:0,motivo,data,prazo,status:'pending'});
+    save(); closeModal('novaDivida'); renderAll(); resetFields(['div-valor','div-motivo']);
+  } catch(err){ alert('Erro: '+err.message); }
 }
 function saveCategoria(){
   const nome=document.getElementById('cat-nome').value;
@@ -1050,10 +1186,22 @@ function clearData(){
 function resetFields(ids){ ids.forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; }); }
 
 // ══ ACTIONS ══
-function deleteTransaction(id){ state.transactions=state.transactions.filter(t=>t.id!==id); save(); renderAll(); }
-function deleteCardPurchase(id){ state.cardPurchases=state.cardPurchases.filter(p=>p.id!==id); save(); renderAll(); }
-function markDebtPaid(id){ const d=state.debts.find(x=>x.id===id); if(d){d.status='paid';d.pago=d.valor;} save(); renderAll(); }
-function deleteFriend(id){ state.friends=state.friends.filter(f=>f.id!==id); state.debts=state.debts.filter(d=>d.amigoId!==id); save(); renderAll(); }
+async function deleteTransaction(id){
+  try{ await api('DELETE','/api/transactions/'+id); } catch(e){ console.warn(e); }
+  state.transactions=state.transactions.filter(t=>t.id!==id); save(); renderAll();
+}
+async function deleteCardPurchase(id){
+  try{ await api('DELETE','/api/cards/purchases/'+id); } catch(e){ console.warn(e); }
+  state.cardPurchases=state.cardPurchases.filter(p=>p.id!==id); save(); renderAll();
+}
+async function markDebtPaid(id){
+  try{ await api('PATCH','/api/friends/debts/'+id+'/pay',{}); } catch(e){ console.warn(e); }
+  const d=state.debts.find(x=>x.id===id); if(d){d.status='paid';d.pago=d.valor;} save(); renderAll();
+}
+async function deleteFriend(id){
+  try{ await api('DELETE','/api/friends/'+id); } catch(e){ console.warn(e); }
+  state.friends=state.friends.filter(f=>f.id!==id); state.debts=state.debts.filter(d=>d.amigoId!==id); save(); renderAll();
+}
 
 // ══ CALCULATIONS ══
 // parcel amount that falls in a given YYYY-MM key
@@ -1485,8 +1633,20 @@ function renderCategorias(){
 }
 
 // ══ INIT ══
-load();
-if(state.user) showApp();
+async function init(){
+  load();
+  // Se tem token salvo, tenta recarregar dados da API
+  if(authToken && state.user){
+    try{
+      await loadAllData();
+      showApp();
+    } catch(e){
+      // Token expirado — volta para login
+      authToken=null; localStorage.removeItem('ci_token');
+    }
+  }
+}
+init();
 </script>
 </body>
 </html>
