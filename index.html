@@ -59,6 +59,7 @@ body{font-family:var(--font);background:var(--bg);color:var(--text);min-height:1
 .summary-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
 .s-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);padding:18px 20px;box-shadow:var(--shadow);transition:box-shadow .2s,transform .2s;cursor:default}
 .s-card:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.s-card[onclick]:hover{box-shadow:0 6px 20px rgba(26,110,245,.12);transform:translateY(-2px)}
 .s-card-top{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px}
 .s-card-label{font-size:12px;font-weight:600;color:var(--text3)}
 .s-card-icon{width:34px;height:34px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0}
@@ -171,8 +172,12 @@ select.form-input option{background:var(--white)}
       <div class="login-logo-sub" id="loginSubtitle">Organize sua vida financeira com inteligência</div>
     </div>
     <div id="loginForm">
-      <div class="form-row"><label class="form-label">E-mail</label><input class="form-input" type="email" id="loginEmail" placeholder="seu@email.com" value="demo@carteira.app"/></div>
-      <div class="form-row"><label class="form-label">Senha</label><input class="form-input" type="password" id="loginPassword" placeholder="••••••••" value="123456"/></div>
+      <div class="form-row"><label class="form-label">E-mail</label><input class="form-input" type="email" id="loginEmail" placeholder="seu@email.com"/></div>
+      <div class="form-row"><label class="form-label">Senha</label><input class="form-input" type="password" id="loginPassword" placeholder="••••••••"/></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:2px;margin-bottom:4px">
+        <input type="checkbox" id="rememberMe" style="width:16px;height:16px;accent-color:var(--blue);cursor:pointer;border-radius:4px"/>
+        <label for="rememberMe" style="font-size:13px;color:var(--text2);cursor:pointer;user-select:none">Entrar automaticamente da próxima vez</label>
+      </div>
       <button class="btn btn-primary" style="width:100%;justify-content:center;padding:11px;font-size:14px;margin-top:6px;border-radius:9px" onclick="doLogin()">Entrar</button>
       <p style="text-align:center;margin-top:14px;font-size:13px;color:var(--text3)">Não tem conta? <span class="login-link" onclick="showRegister()">Criar conta</span></p>
     </div>
@@ -772,12 +777,23 @@ async function doLogin(){
   const email=document.getElementById('loginEmail').value;
   const password=document.getElementById('loginPassword').value;
   if(!email||!password){alert('Preencha e-mail e senha');return;}
+  const remember=document.getElementById('rememberMe').checked;
   const btn=document.querySelector('#loginForm button');
   setLoading(btn,true,'Entrar');
   try{
     const data = await api('POST','/api/auth/login',{email,password});
     authToken = data.token;
     localStorage.setItem('ci_token', authToken);
+    // Salva o último e-mail sempre
+    localStorage.setItem('ci_last_email', email);
+    // Salva preferência de auto-login
+    if(remember){
+      localStorage.setItem('ci_auto_login','1');
+      localStorage.setItem('ci_saved_pass', btoa(password)); // ofuscado (não é seguro para produção, mas ok para uso pessoal)
+    } else {
+      localStorage.removeItem('ci_auto_login');
+      localStorage.removeItem('ci_saved_pass');
+    }
     state.user = {id:data.user.id, name:data.user.name, email:data.user.email};
     state.initialBalance = parseFloat(data.user.initialBalance||0);
     save();
@@ -859,7 +875,17 @@ async function loadAllData(){
 function showRegister(){ document.getElementById('loginForm').style.display='none'; document.getElementById('registerForm').style.display='block'; }
 function showLogin(){ document.getElementById('loginForm').style.display='block'; document.getElementById('registerForm').style.display='none'; }
 function showApp(){ document.getElementById('loginScreen').style.display='none'; document.getElementById('appScreen').style.display='block'; updateUserUI(); renderAll(); }
-function logout(){ authToken=null; localStorage.removeItem('ci_token'); document.getElementById('appScreen').style.display='none'; document.getElementById('loginScreen').style.display='flex'; }
+function logout(){
+  authToken=null;
+  localStorage.removeItem('ci_token');
+  localStorage.removeItem('ci_auto_login');
+  localStorage.removeItem('ci_saved_pass');
+  document.getElementById('appScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+  // Mantém o último e-mail preenchido
+  const lastEmail=localStorage.getItem('ci_last_email');
+  if(lastEmail) document.getElementById('loginEmail').value=lastEmail;
+}
 function updateUserUI(){
   if(!state.user) return;
   const init=state.user.name.split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase();
@@ -1467,7 +1493,11 @@ function renderCartoes(){
       return `<div class="cc-visual" style="background:${c.cor}">
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div class="cc-bank">${c.banco} · ${c.bandeira}</div>
-          <span style="font-size:10px;font-weight:700;opacity:.8;background:rgba(0,0,0,.2);padding:2px 7px;border-radius:10px">${isFutureMth?'★ Parcela futura':'Fecha dia '+c.fecha}</span>
+          <div style="display:flex;gap:5px;align-items:center">
+            <span style="font-size:10px;font-weight:700;opacity:.8;background:rgba(0,0,0,.2);padding:2px 7px;border-radius:10px">${isFutureMth?'★ Futura':'Fecha dia '+c.fecha}</span>
+            <button onclick="event.stopPropagation();editCard('${c.id}')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:12px" title="Editar">✏️</button>
+            <button onclick="event.stopPropagation();deleteCard('${c.id}')" style="background:rgba(255,0,0,.25);border:none;color:#fff;width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:12px" title="Excluir">🗑</button>
+          </div>
         </div>
         <div>
           <div style="font-size:10px;opacity:.7;margin-bottom:2px">Fatura de ${monthNamesFull[cardViewMonth]}</div>
@@ -1482,7 +1512,10 @@ function renderCartoes(){
             ${debMes>0?`<div class="cc-meta-item" style="opacity:1">🔻 Débito<span style="color:#fca5a5">${fmt(debMes)}</span></div>`:''}
           </div>
         </div>
-        <div class="cc-name">${c.nome.toUpperCase()}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+          <div class="cc-name">${c.nome.toUpperCase()}</div>
+          ${fatMes>0?`<button onclick="event.stopPropagation();openPagarCartao('${c.id}','${c.nome}',${fatMes})" style="background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">💳 Pagar fatura</button>`:''}
+        </div>
       </div>`;
     }).join('');
   }
@@ -1553,12 +1586,19 @@ function renderInvestimentos(){
     return `<div class="inv-card">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:12px">
         <div><div style="font-size:15px;font-weight:700">${inv.nome}</div><div style="font-size:11px;color:var(--text3);font-weight:600;margin-top:2px;text-transform:uppercase;letter-spacing:.3px">${tipoIcon[inv.tipo]||'🎯'} ${inv.tipo}</div></div>
-        <span style="font-size:13px;font-weight:800;color:${barColor}">${Math.round(pct)}%</span>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:13px;font-weight:800;color:${barColor}">${Math.round(pct)}%</span>
+          <button onclick="deleteInvestimento('${inv.id}')" style="background:none;border:1px solid var(--border);color:var(--text3);width:26px;height:26px;border-radius:6px;cursor:pointer;font-size:12px" title="Excluir">🗑</button>
+        </div>
       </div>
       <div style="font-size:22px;font-weight:800;color:var(--green);letter-spacing:-.5px">${fmt(inv.atual)}</div>
       <div style="font-size:12px;color:var(--text3);margin-top:2px;margin-bottom:12px">Meta: ${fmt(inv.meta)} · Falta: ${fmt(rest)}</div>
       <div class="progress-wrap"><div class="progress-fill" style="width:${pct}%;background:${barColor}"></div></div>
       ${inv.data?`<div style="font-size:11px;color:var(--text3);margin-top:8px">🎯 Prazo: ${inv.data}</div>`:''}
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button onclick="openAddInv('${inv.id}','deposito')" class="btn btn-success btn-sm" style="flex:1;justify-content:center">+ Depositar</button>
+        <button onclick="openAddInv('${inv.id}','retirada')" class="btn btn-danger btn-sm" style="flex:1;justify-content:center">− Retirar</button>
+      </div>
     </div>`;
   }).join('');
 }
@@ -1632,21 +1672,218 @@ function renderCategorias(){
   </div>`).join('');
 }
 
+// ══ PAGAR CARTÃO ══
+function openPagarCartao(cardId, cardNome, fatMes){
+  document.getElementById('pc-card-id').value=cardId;
+  document.getElementById('pc-card-nome').textContent=cardNome;
+  document.getElementById('pc-fatura').textContent=fmt(fatMes);
+  document.getElementById('pc-valor').value=fatMes.toFixed(2);
+  document.getElementById('pc-data').value=today();
+  document.getElementById('modal-pagarCartao').classList.add('open');
+}
+async function savePagarCartao(){
+  const cardId=document.getElementById('pc-card-id').value;
+  const valor=parseFloat(document.getElementById('pc-valor').value)||0;
+  const date=document.getElementById('pc-data').value;
+  const cardNome=document.getElementById('pc-card-nome').textContent;
+  if(!valor){alert('Informe o valor');return;}
+  try{
+    // Lança como saída na conta geral vinculada ao cartão
+    const t=await api('POST','/api/transactions',{type:'expense',description:'Pagamento fatura — '+cardNome,amount:valor,date,categoryId:null,cardId,notes:'Pagamento de fatura'});
+    state.transactions.push({id:String(t.id),type:'expense',desc:'Pagamento fatura — '+cardNome,valor,data:date,catId:'cat12',cardId});
+    save(); closeModal('pagarCartao'); renderAll();
+    alert('✅ Pagamento de '+fmt(valor)+' registrado!');
+  } catch(err){ alert('Erro: '+err.message); }
+}
+
+// ══ ADICIONAR AO INVESTIMENTO ══
+function openAddInv(invId, tipo){
+  document.getElementById('ai-inv-id').value=invId;
+  document.getElementById('ai-tipo').value=tipo;
+  const inv=state.investments.find(x=>x.id===invId);
+  document.getElementById('ai-inv-nome').textContent=inv?inv.nome:'';
+  document.getElementById('ai-tipo-label').textContent=tipo==='deposito'?'Depositar':'Retirar';
+  document.getElementById('ai-valor').value='';
+  document.getElementById('modal-addInv').classList.add('open');
+}
+async function saveAddInv(){
+  const invId=document.getElementById('ai-inv-id').value;
+  const tipo=document.getElementById('ai-tipo').value;
+  const valor=parseFloat(document.getElementById('ai-valor').value)||0;
+  if(!valor){alert('Informe o valor');return;}
+  const inv=state.investments.find(x=>x.id===invId);
+  if(!inv) return;
+  const novoAtual=tipo==='deposito'?inv.atual+valor:Math.max(inv.atual-valor,0);
+  try{
+    await api('PUT','/api/investments/'+invId,{currentAmount:novoAtual});
+    inv.atual=novoAtual;
+    save(); closeModal('addInv'); renderAll();
+    alert('✅ '+fmt(valor)+' '+(tipo==='deposito'?'adicionado':'retirado')+' com sucesso!');
+  } catch(err){ alert('Erro: '+err.message); }
+}
+
+// ══ EDITAR CARTÃO ══
+function editCard(id){
+  const c=state.cards.find(x=>x.id===id);
+  if(!c) return;
+  document.getElementById('ec-id').value=id;
+  document.getElementById('ec-nome').value=c.nome;
+  document.getElementById('ec-banco').value=c.banco||'';
+  document.getElementById('ec-limite').value=c.limite||'';
+  document.getElementById('ec-fecha').value=c.fecha||10;
+  document.getElementById('ec-vence').value=c.vence||17;
+  document.getElementById('modal-editCartao').classList.add('open');
+}
+async function saveEditCartao(){
+  const id=document.getElementById('ec-id').value;
+  const nome=document.getElementById('ec-nome').value;
+  const banco=document.getElementById('ec-banco').value;
+  const limite=parseFloat(document.getElementById('ec-limite').value)||0;
+  const fecha=parseInt(document.getElementById('ec-fecha').value)||10;
+  const vence=parseInt(document.getElementById('ec-vence').value)||17;
+  if(!nome){alert('Informe o nome');return;}
+  try{
+    await api('PUT','/api/cards/'+id,{name:nome,bank:banco,totalLimit:limite,closingDay:fecha,dueDay:vence});
+    const c=state.cards.find(x=>x.id===id);
+    if(c){c.nome=nome;c.banco=banco;c.limite=limite;c.fecha=fecha;c.vence=vence;}
+    save(); closeModal('editCartao'); renderAll();
+  } catch(err){ alert('Erro: '+err.message); }
+}
+async function deleteCard(id){
+  if(!confirm('Excluir este cartão e todas as compras vinculadas?')) return;
+  try{ await api('DELETE','/api/cards/'+id); } catch(e){ console.warn(e); }
+  state.cards=state.cards.filter(c=>c.id!==id);
+  state.cardPurchases=state.cardPurchases.filter(p=>p.cardId!==id);
+  save(); renderAll();
+}
+async function deleteInvestimento(id){
+  if(!confirm('Excluir este objetivo?')) return;
+  try{ await api('DELETE','/api/investments/'+id); } catch(e){ console.warn(e); }
+  state.investments=state.investments.filter(i=>i.id!==id);
+  save(); renderAll();
+}
+
 // ══ INIT ══
 async function init(){
   load();
-  // Se tem token salvo, tenta recarregar dados da API
-  if(authToken && state.user){
+
+  // Preenche o último e-mail salvo
+  const lastEmail = localStorage.getItem('ci_last_email');
+  if(lastEmail){
+    document.getElementById('loginEmail').value = lastEmail;
+  }
+
+  // Se marcou "entrar automaticamente", tenta auto-login
+  const autoLogin = localStorage.getItem('ci_auto_login');
+  const savedPass = localStorage.getItem('ci_saved_pass');
+  if(autoLogin && lastEmail && savedPass){
+    // Marca o checkbox
+    document.getElementById('rememberMe').checked = true;
+    // Tenta logar automaticamente com token salvo primeiro
+    if(authToken && state.user){
+      try{
+        await loadAllData();
+        showApp();
+        return;
+      } catch(e){
+        authToken=null; localStorage.removeItem('ci_token');
+      }
+    }
+    // Tenta logar com senha salva
+    try{
+      document.getElementById('loginPassword').value = atob(savedPass);
+      const btn = document.querySelector('#loginForm button');
+      setLoading(btn, true, 'Entrar');
+      const data = await api('POST','/api/auth/login',{email:lastEmail, password:atob(savedPass)});
+      authToken = data.token;
+      localStorage.setItem('ci_token', authToken);
+      state.user = {id:data.user.id, name:data.user.name, email:data.user.email};
+      state.initialBalance = parseFloat(data.user.initialBalance||0);
+      save();
+      await loadAllData();
+      showApp();
+      return;
+    } catch(e){
+      // Auto-login falhou — mostra tela de login normalmente
+      document.getElementById('loginPassword').value = '';
+      const btn = document.querySelector('#loginForm button');
+      if(btn){ btn.disabled=false; btn.textContent='Entrar'; }
+    }
+  } else if(authToken && state.user){
+    // Token ainda válido, entra direto
     try{
       await loadAllData();
       showApp();
     } catch(e){
-      // Token expirado — volta para login
       authToken=null; localStorage.removeItem('ci_token');
     }
   }
 }
 init();
 </script>
+
+<!-- Modal: Pagar Cartão -->
+<div class="overlay" id="modal-pagarCartao">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">💳 Pagar Fatura</div>
+      <div class="modal-close" onclick="closeModal('pagarCartao')">✕</div>
+    </div>
+    <input type="hidden" id="pc-card-id"/>
+    <div style="background:var(--bg);border-radius:10px;padding:14px;margin-bottom:16px">
+      <div style="font-size:12px;color:var(--text3);font-weight:600;text-transform:uppercase;margin-bottom:4px">Cartão</div>
+      <div style="font-size:15px;font-weight:700" id="pc-card-nome">—</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:4px">Fatura: <strong style="color:var(--red)" id="pc-fatura">R$ 0,00</strong></div>
+    </div>
+    <div class="form-row"><label class="form-label">Valor a pagar (R$)</label><input class="form-input" id="pc-valor" type="number" placeholder="0,00"/></div>
+    <div class="form-row"><label class="form-label">Data do pagamento</label><input class="form-input" id="pc-data" type="date"/></div>
+    <div style="font-size:12px;color:var(--text3);margin-top:4px">⚠️ O valor será descontado do seu saldo disponível</div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('pagarCartao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePagarCartao()">✅ Confirmar pagamento</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Adicionar ao Investimento -->
+<div class="overlay" id="modal-addInv">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title" id="ai-tipo-label">Depositar</div>
+      <div class="modal-close" onclick="closeModal('addInv')">✕</div>
+    </div>
+    <input type="hidden" id="ai-inv-id"/>
+    <input type="hidden" id="ai-tipo"/>
+    <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px" id="ai-inv-nome">—</div>
+    <div class="form-row"><label class="form-label">Valor (R$)</label><input class="form-input" id="ai-valor" type="number" placeholder="0,00" autofocus/></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('addInv')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveAddInv()">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Editar Cartão -->
+<div class="overlay" id="modal-editCartao">
+  <div class="modal">
+    <div class="modal-header">
+      <div class="modal-title">✏️ Editar Cartão</div>
+      <div class="modal-close" onclick="closeModal('editCartao')">✕</div>
+    </div>
+    <input type="hidden" id="ec-id"/>
+    <div class="form-row"><label class="form-label">Nome do cartão</label><input class="form-input" id="ec-nome" placeholder="Ex: Nubank Roxo"/></div>
+    <div class="form-row"><label class="form-label">Banco</label><input class="form-input" id="ec-banco" placeholder="Ex: Nubank"/></div>
+    <div class="form-row"><label class="form-label">Limite total (R$)</label><input class="form-input" id="ec-limite" type="number" placeholder="0,00"/></div>
+    <div class="form-grid">
+      <div class="form-row"><label class="form-label">Dia de fechamento</label><input class="form-input" id="ec-fecha" type="number" min="1" max="31"/></div>
+      <div class="form-row"><label class="form-label">Dia de vencimento</label><input class="form-input" id="ec-vence" type="number" min="1" max="31"/></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal('editCartao')">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveEditCartao()">Salvar alterações</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
