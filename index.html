@@ -119,10 +119,11 @@ select.form-input option{background:var(--white)}
 .fab-option .fo-icon{width:26px;height:26px;border-radius:6px;background:var(--bg);display:flex;align-items:center;justify-content:center;font-size:14px}
 .progress-wrap{background:var(--bg);border-radius:20px;height:7px}
 .progress-fill{height:7px;border-radius:20px;transition:width .4s}
-.cc-visual{border-radius:14px;padding:18px;color:#fff;position:relative;overflow:hidden;min-height:160px;display:flex;flex-direction:column;justify-content:space-between;cursor:pointer;transition:transform .2s,box-shadow .2s}
+.cc-visual{border-radius:14px;padding:18px;color:#fff;position:relative;overflow:hidden;min-height:160px;display:flex;flex-direction:column;justify-content:space-between;transition:transform .2s,box-shadow .2s}
 .cc-visual:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.15)}
-.cc-visual::before{content:'';position:absolute;top:-20px;right:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.08)}
-.cc-visual::after{content:'';position:absolute;bottom:-30px;right:30px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,.05)}
+.cc-visual .cc-deco1{position:absolute;top:-20px;right:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.08);pointer-events:none;z-index:0}
+.cc-visual .cc-deco2{position:absolute;bottom:-30px;right:30px;width:80px;height:80px;border-radius:50%;background:rgba(255,255,255,.05);pointer-events:none;z-index:0}
+.cc-visual>*{position:relative;z-index:1}
 .cc-bank{font-size:12px;font-weight:500;opacity:.75}
 .cc-limit-val{font-size:19px;font-weight:800;letter-spacing:-.5px;margin-top:2px}
 .cc-name{font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;opacity:.85}
@@ -1494,31 +1495,39 @@ function renderCartoes(){
       const credMes=state.transactions.filter(t=>t.type==='income'&&t.cardId===c.id&&t.data&&t.data.startsWith(ck)).reduce((a,t)=>a+t.valor,0);
       const debMes=state.transactions.filter(t=>t.type==='debit'&&t.cardId===c.id&&t.data&&t.data.startsWith(ck)).reduce((a,t)=>a+t.valor,0);
       const isFutureMth=ck>realNow;
+      // calc total paid (fatura payments) for this card
+      const totalPago=state.transactions.filter(t=>t.type==='expense'&&t.cardId===c.id&&t.obs==='Pagamento de fatura').reduce((a,t)=>a+t.valor,0);
+      const totalCompras=state.cardPurchases.filter(p=>p.cardId===c.id).reduce((a,p)=>a+p.valor,0);
+      const realUsed=Math.max(totalCompras-totalPago,0);
+      const realAvail=Math.max(c.limite-realUsed,0);
+      const realPct=c.limite>0?Math.min(realUsed/c.limite*100,100):0;
       return `<div class="cc-visual" style="background:${c.cor}">
+        <div class="cc-deco1"></div>
+        <div class="cc-deco2"></div>
         <div style="display:flex;justify-content:space-between;align-items:flex-start">
           <div class="cc-bank">${c.banco} · ${c.bandeira}</div>
           <div style="display:flex;gap:5px;align-items:center">
             <span style="font-size:10px;font-weight:700;opacity:.8;background:rgba(0,0,0,.2);padding:2px 7px;border-radius:10px">${isFutureMth?'★ Futura':'Fecha dia '+c.fecha}</span>
-            <button onclick="event.stopPropagation();editCard('${c.id}')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:12px" title="Editar">✏️</button>
-            <button onclick="event.stopPropagation();deleteCard('${c.id}')" style="background:rgba(255,0,0,.25);border:none;color:#fff;width:24px;height:24px;border-radius:6px;cursor:pointer;font-size:12px" title="Excluir">🗑</button>
+            <button onclick="editCard('${c.id}')" style="background:rgba(255,255,255,.2);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center" title="Editar cartão">✏️</button>
+            <button onclick="deleteCard('${c.id}')" style="background:rgba(200,0,0,.35);border:none;color:#fff;width:28px;height:28px;border-radius:6px;cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center" title="Excluir cartão">🗑</button>
           </div>
         </div>
         <div>
           <div style="font-size:10px;opacity:.7;margin-bottom:2px">Fatura de ${monthNamesFull[cardViewMonth]}</div>
           <div class="cc-limit-val" style="font-size:22px">${fmt(fatMes)}</div>
-          ${brutoMes!==fatMes&&credMes>0?`<div style="font-size:10px;opacity:.65;margin-top:1px">Compras: ${fmt(brutoMes)} − Pag: ${fmt(credMes)}</div>`:''}
-          <div style="background:rgba(255,255,255,.2);border-radius:4px;height:3px;margin:8px 0"><div style="background:rgba(255,255,255,.85);height:3px;border-radius:4px;width:${pct}%"></div></div>
+          ${totalPago>0?`<div style="font-size:10px;opacity:.75;margin-top:2px;color:#a7f3d0">✅ Pago: ${fmt(totalPago)}</div>`:''}
+          <div style="background:rgba(255,255,255,.2);border-radius:4px;height:4px;margin:8px 0">
+            <div style="background:${realPct>80?'#fca5a5':'rgba(255,255,255,.85)'};height:4px;border-radius:4px;width:${realPct}%;transition:width .4s"></div>
+          </div>
           <div class="cc-meta">
-            <div class="cc-meta-item">Limite disp.<span>${fmt(avail)}</span></div>
+            <div class="cc-meta-item">Limite disp.<span style="color:${realPct>80?'#fca5a5':'#fff'}">${fmt(realAvail)}</span></div>
             <div class="cc-meta-item">Limite total<span>${fmt(c.limite)}</span></div>
             <div class="cc-meta-item">Vence dia<span>${c.vence}</span></div>
-            ${credMes>0?`<div class="cc-meta-item" style="opacity:1">💰 Recebido<span style="color:#a7f3d0">${fmt(credMes)}</span></div>`:''}
-            ${debMes>0?`<div class="cc-meta-item" style="opacity:1">🔻 Débito<span style="color:#fca5a5">${fmt(debMes)}</span></div>`:''}
           </div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">
           <div class="cc-name">${c.nome.toUpperCase()}</div>
-          ${fatMes>0?`<button onclick="event.stopPropagation();openPagarCartao('${c.id}','${c.nome}',${fatMes})" style="background:rgba(255,255,255,.25);border:1px solid rgba(255,255,255,.4);color:#fff;padding:4px 10px;border-radius:7px;font-size:11px;font-weight:700;cursor:pointer">💳 Pagar fatura</button>`:''}
+          ${fatMes>0?`<button onclick="openPagarCartao('${c.id}','${c.nome}',${fatMes})" style="background:rgba(255,255,255,.25);border:1.5px solid rgba(255,255,255,.5);color:#fff;padding:5px 12px;border-radius:8px;font-size:11px;font-weight:700;cursor:pointer;white-space:nowrap">💳 Pagar fatura</button>`:'<span style="font-size:10px;opacity:.6">Sem fatura</span>'}
         </div>
       </div>`;
     }).join('');
@@ -1681,6 +1690,7 @@ function openPagarCartao(cardId, cardNome, fatMes){
   document.getElementById('pc-card-id').value=cardId;
   document.getElementById('pc-card-nome').textContent=cardNome;
   document.getElementById('pc-fatura').textContent=fmt(fatMes);
+  document.getElementById('pc-fatura-total').value=fatMes;
   document.getElementById('pc-valor').value=fatMes.toFixed(2);
   document.getElementById('pc-data').value=today();
   document.getElementById('modal-pagarCartao').classList.add('open');
@@ -1690,14 +1700,36 @@ async function savePagarCartao(){
   const valor=parseFloat(document.getElementById('pc-valor').value)||0;
   const date=document.getElementById('pc-data').value;
   const cardNome=document.getElementById('pc-card-nome').textContent;
+  const fatTotal=parseFloat(document.getElementById('pc-fatura-total').value)||0;
   if(!valor){alert('Informe o valor');return;}
+  if(!date){alert('Informe a data');return;}
   try{
-    // Lança como saída na conta geral vinculada ao cartão
-    const t=await api('POST','/api/transactions',{type:'expense',description:'Pagamento fatura — '+cardNome,amount:valor,date,categoryId:null,cardId,notes:'Pagamento de fatura'});
-    state.transactions.push({id:String(t.id),type:'expense',desc:'Pagamento fatura — '+cardNome,valor,data:date,catId:'cat12',cardId});
+    // 1. Desconta do saldo da conta (saída)
+    const t=await api('POST','/api/transactions',{
+      type:'expense',
+      description:'Pagamento fatura — '+cardNome,
+      amount:valor,date,
+      categoryId:null,
+      cardId:cardId,
+      notes:'Pagamento de fatura'
+    });
+    state.transactions.push({id:String(t.id),type:'expense',desc:'Pagamento fatura — '+cardNome,valor,data:date,catId:'cat12',cardId,obs:'Pagamento de fatura'});
+
+    // 2. Se pagou o valor total da fatura, remove as compras pagas (libera limite)
+    // Abate proporcional: remove compras do mais antigo para o mais novo
+    if(valor>=fatTotal){
+      // Pagamento total — remove todas as compras deste cartão que já venceram
+      const ck=cardMonthKey();
+      const toRemove=state.cardPurchases.filter(p=>p.cardId===cardId&&parcelInMonth(p,ck)>0);
+      for(const p of toRemove){
+        try{ await api('DELETE','/api/cards/purchases/'+p.id); }catch(e){}
+        state.cardPurchases=state.cardPurchases.filter(x=>x.id!==p.id);
+      }
+    }
+
     save(); closeModal('pagarCartao'); renderAll();
-    alert('✅ Pagamento de '+fmt(valor)+' registrado!');
-  } catch(err){ alert('Erro: '+err.message); }
+    alert('✅ Fatura de '+fmt(valor)+' paga! Limite liberado.');
+  } catch(err){ alert('Erro ao pagar: '+err.message); }
 }
 
 // ══ ADICIONAR AO INVESTIMENTO ══
@@ -1839,9 +1871,12 @@ init();
       <div style="font-size:15px;font-weight:700" id="pc-card-nome">—</div>
       <div style="font-size:12px;color:var(--text3);margin-top:4px">Fatura: <strong style="color:var(--red)" id="pc-fatura">R$ 0,00</strong></div>
     </div>
+    <input type="hidden" id="pc-fatura-total"/>
     <div class="form-row"><label class="form-label">Valor a pagar (R$)</label><input class="form-input" id="pc-valor" type="number" placeholder="0,00"/></div>
     <div class="form-row"><label class="form-label">Data do pagamento</label><input class="form-input" id="pc-data" type="date"/></div>
-    <div style="font-size:12px;color:var(--text3);margin-top:4px">⚠️ O valor será descontado do seu saldo disponível</div>
+    <div style="background:var(--blue-light);border-radius:8px;padding:10px 12px;font-size:12px;color:var(--blue);margin-top:4px">
+      💡 Se pagar o valor total da fatura, as compras são removidas e o limite é liberado automaticamente.
+    </div>
     <div class="modal-actions">
       <button class="btn btn-ghost" onclick="closeModal('pagarCartao')">Cancelar</button>
       <button class="btn btn-primary" onclick="savePagarCartao()">✅ Confirmar pagamento</button>
