@@ -3,7 +3,10 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-<title>Carteira Inteligente</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate"/>
+<meta http-equiv="Pragma" content="no-cache"/>
+<meta http-equiv="Expires" content="0"/>
+<title>Carteira Inteligente v2.1</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet"/>
@@ -210,6 +213,7 @@ select.form-input option{background:var(--white)}
       <div class="nav-item" onclick="navigate('categorias',this)" data-page="categorias"><div class="ni-icon">🏷️</div>Categorias</div>
       <div class="nav-item" onclick="navigate('config',this)" data-page="config"><div class="ni-icon">⚙️</div>Configurações</div>
     </nav>
+    <div style="padding:4px 18px;font-size:10px;color:rgba(255,255,255,.25);text-align:center">v2.1</div>
     <div class="sidebar-footer">
       <div class="user-pill" onclick="logout()">
         <div class="avatar" id="sidebarAvatar">JD</div>
@@ -262,35 +266,35 @@ select.form-input option{background:var(--white)}
         </div>
 
         <div class="summary-grid">
-          <div class="s-card s-blue">
+          <div class="s-card s-blue" onclick="navigate('conta',null)" style="cursor:pointer" title="Ver conta geral">
             <div class="s-card-top"><span class="s-card-label">Saldo Disponível</span><div class="s-card-icon">📂</div></div>
             <div class="s-card-value" id="d-saldo">R$ 0,00</div>
-            <div class="s-card-sub">Conta geral atual</div>
+            <div class="s-card-sub">Conta geral →</div>
           </div>
-          <div class="s-card s-red">
+          <div class="s-card s-red" onclick="navigate('debito',null)" style="cursor:pointer" title="Ver gastos">
             <div class="s-card-top"><span class="s-card-label">Gastos do Mês</span><div class="s-card-icon">📉</div></div>
             <div class="s-card-value" id="d-gastos">R$ 0,00</div>
-            <div class="s-card-sub" id="d-gastos-sub">Débito + parcelas do mês</div>
+            <div class="s-card-sub" id="d-gastos-sub">Débito + parcelas →</div>
           </div>
-          <div class="s-card s-dark">
+          <div class="s-card s-dark" onclick="navigate('cartoes',null)" style="cursor:pointer" title="Ver cartões">
             <div class="s-card-top"><span class="s-card-label">Fatura do Mês</span><div class="s-card-icon">💳</div></div>
             <div class="s-card-value" id="d-faturas">R$ 0,00</div>
-            <div class="s-card-sub" id="d-faturas-sub">Parcelas que vencem este mês</div>
+            <div class="s-card-sub" id="d-faturas-sub">Ver cartões →</div>
           </div>
-          <div class="s-card s-red">
+          <div class="s-card s-red" onclick="navigate('debito',null)" style="cursor:pointer" title="Ver débito">
             <div class="s-card-top"><span class="s-card-label">Gastos no Débito</span><div class="s-card-icon">📤</div></div>
             <div class="s-card-value" id="d-debito">R$ 0,00</div>
-            <div class="s-card-sub" id="d-debito-sub">Pix, débito e dinheiro</div>
+            <div class="s-card-sub" id="d-debito-sub">Pix, débito →</div>
           </div>
-          <div class="s-card s-green">
+          <div class="s-card s-green" onclick="navigate('investimentos',null)" style="cursor:pointer" title="Ver investimentos">
             <div class="s-card-top"><span class="s-card-label">Dinheiro Guardado</span><div class="s-card-icon">🐖</div></div>
             <div class="s-card-value" id="d-guardado">R$ 0,00</div>
-            <div class="s-card-sub">Investimentos / Reservas</div>
+            <div class="s-card-sub">Investimentos →</div>
           </div>
-          <div class="s-card s-teal">
+          <div class="s-card s-teal" onclick="navigate('amigos',null)" style="cursor:pointer" title="Ver amigos">
             <div class="s-card-top"><span class="s-card-label">Valores a Receber</span><div class="s-card-icon">👥</div></div>
             <div class="s-card-value" id="d-receber">R$ 0,00</div>
-            <div class="s-card-sub">Dívidas de amigos</div>
+            <div class="s-card-sub">Ver amigos →</div>
           </div>
           <div class="s-card s-dark" style="grid-column:span 2">
             <div class="s-card-top"><span class="s-card-label">Saldo Final Estimado (mês)</span><div class="s-card-icon" style="background:#f1f3f7;color:var(--text2)">$</div></div>
