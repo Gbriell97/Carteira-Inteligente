@@ -1140,13 +1140,28 @@ async function loadAllData(){
     state.friends = friends.map(f=>({
       id:String(f.id), nome:f.name, tel:f.phone||'', email:f.email||''
     }));
-    state.debts = debts.map(d=>({
-      id:String(d.id), amigoId:String(d.friend_id), valor:parseFloat(d.original_amount),
-      pago:parseFloat(d.paid_amount||0), motivo:d.description,
-      data:d.loan_date?d.loan_date.slice(0,10):null,
-      prazo:d.expected_payment_date?d.expected_payment_date.slice(0,10):null,
-      status:d.status||'pending'
-    }));
+    state.debts = debts.map(d=>{
+      // Extract parcelas info from notes if available
+      let parcelas=1, valorParcela=0, parcelasPagas=[], cardId=null;
+      if(d.notes){
+        const mParcelas=d.notes.match(/(\d+)x\s+de/);
+        if(mParcelas) parcelas=parseInt(mParcelas[1]);
+        const mCard=d.notes.match(/Cartão: ([^|]+)/);
+        // parcelasPagas stored in notes as JSON
+        const mPagas=d.notes.match(/pagas:(\[[^\]]+\])/);
+        if(mPagas){ try{ parcelasPagas=JSON.parse(mPagas[1]); }catch(e){} }
+      }
+      const totalAmt=parseFloat(d.original_amount);
+      valorParcela=parcelas>1?totalAmt/parcelas:totalAmt;
+      return {
+        id:String(d.id), amigoId:String(d.friend_id), valor:totalAmt,
+        pago:parseFloat(d.paid_amount||0), motivo:d.description,
+        data:d.loan_date?d.loan_date.slice(0,10):null,
+        prazo:d.expected_payment_date?d.expected_payment_date.slice(0,10):null,
+        status:d.status||'pending',
+        parcelas, valorParcela, parcelasPagas, cardId
+      };
+    });
     if(cats && cats.length){
       state.categories = cats.map(c=>({
         id:String(c.id), name:c.name, type:c.type, icon:c.icon||'📦', color:c.color||'#6b7280'
@@ -1756,6 +1771,40 @@ async function markDebtPaid(id){
   try{ await api('PATCH','/api/friends/debts/'+id+'/pay',{}); } catch(e){ console.warn(e); }
   const d=state.debts.find(x=>x.id===id); if(d){d.status='paid';d.pago=d.valor;} save(); renderAll();
 }
+
+// Mark a specific installment as paid
+async function markParcelPaid(debtId, parcelaNum){
+  const d=state.debts.find(x=>x.id===debtId);
+  if(!d) return;
+  const parcelaVal=d.valorParcela||(d.valor/(d.parcelas||1));
+
+  // Track paid parcels locally
+  if(!d.parcelasPagas) d.parcelasPagas=[];
+  if(d.parcelasPagas.includes(parcelaNum)){
+    if(!confirm('Desmarcar parcela '+(parcelaNum+1)+' como paga?')) return;
+    d.parcelasPagas=d.parcelasPagas.filter(p=>p!==parcelaNum);
+  } else {
+    d.parcelasPagas.push(parcelaNum);
+  }
+
+  // Recalculate pago amount
+  d.pago=(d.parcelasPagas.length)*parcelaVal;
+
+  // Update status
+  if(d.parcelasPagas.length>=(d.parcelas||1)){
+    d.status='paid'; d.pago=d.valor;
+    // Mark fully paid in API
+    try{ await api('PATCH','/api/friends/debts/'+debtId+'/pay',{amount:d.valor}); } catch(e){ console.warn(e); }
+  } else if(d.parcelasPagas.length>0){
+    d.status='partially_paid';
+    // Register partial payment in API
+    try{ await api('PATCH','/api/friends/debts/'+debtId+'/pay',{amount:parcelaVal}); } catch(e){ console.warn(e); }
+  } else {
+    d.status='pending';
+  }
+
+  save(); renderAll();
+}
 async function deleteFriend(id){
   try{ await api('DELETE','/api/friends/'+id); } catch(e){ console.warn(e); }
   state.friends=state.friends.filter(f=>f.id!==id); state.debts=state.debts.filter(d=>d.amigoId!==id); save(); renderAll();
@@ -1803,7 +1852,14 @@ function calcDebitoMes(monthKey){
   return state.transactions.filter(t=>t.type==='debit'&&t.data&&t.data.startsWith(monthKey)).reduce((a,t)=>a+t.valor,0);
 }
 function calcGuardado(){ return state.investments.reduce((a,i)=>a+i.atual,0); }
-function calcAReceber(){ return state.debts.filter(d=>d.status!=='paid').reduce((a,d)=>a+(d.valor-d.pago),0); }
+function calcAReceber(){
+  return state.debts.filter(d=>d.status!=='paid').reduce((a,d)=>{
+    const parcelaVal=d.valorParcela||(d.valor/(d.parcelas||1));
+    const pagas=d.parcelasPagas?d.parcelasPagas.length:0;
+    const restante=d.valor-(pagas*parcelaVal);
+    return a+Math.max(restante,0);
+  },0);
+}
 function calcReceberMesAtual(){ return calcReceberMes(viewMonthKey()); }
 
 // ══ RENDER ══
@@ -2237,9 +2293,16 @@ function renderAmigos(){
             const mKey=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0');
             const isCurrent=mKey===nowKey;
             const isPast=mKey<nowKey;
-            rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-radius:6px;background:${isCurrent?'var(--blue-light)':isPast?'var(--bg)':'transparent'};margin-bottom:2px">
-              <span style="font-size:11.5px;color:${isCurrent?'var(--blue)':'var(--text3)'}">Parcela ${i+1}/${d.parcelas} — ${monthNames[dt.getMonth()]}/${dt.getFullYear()}</span>
-              <span style="font-size:12px;font-weight:700;color:${isCurrent?'var(--blue)':'var(--text)'}">${fmt(parcelaVal)}</span>
+            const isPagas=d.parcelasPagas&&d.parcelasPagas.includes(i);
+            const bgColor=isPagas?'var(--green-light)':isCurrent?'var(--blue-light)':isPast?'var(--bg)':'transparent';
+            const textColor=isPagas?'var(--green)':isCurrent?'var(--blue)':'var(--text3)';
+            const valColor=isPagas?'var(--green)':isCurrent?'var(--blue)':'var(--text)';
+            rows.push(`<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border-radius:6px;background:${bgColor};margin-bottom:2px;border:1px solid ${isPagas?'var(--green-light)':isCurrent?'var(--blue-light)':'transparent'}">
+              <div style="display:flex;align-items:center;gap:8px">
+                <button onclick="markParcelPaid('${d.id}',${i})" title="${isPagas?'Desmarcar':'Marcar como pago'}" style="width:20px;height:20px;border-radius:50%;border:2px solid ${isPagas?'var(--green)':'var(--border2)'};background:${isPagas?'var(--green)':'transparent'};cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0">${isPagas?'✓':''}</button>
+                <span style="font-size:11.5px;color:${textColor};${isPagas?'text-decoration:line-through;':''}">${isPagas?'✅ ':''}Parcela ${i+1}/${d.parcelas} — ${monthNames[dt.getMonth()]}/${dt.getFullYear()}</span>
+              </div>
+              <span style="font-size:12px;font-weight:700;color:${valColor}">${fmt(parcelaVal)}</span>
             </div>`);
           }
           parcelasHTML=`<div style="margin-top:8px;padding:8px;background:var(--bg);border-radius:8px;border:1px solid var(--border)">
